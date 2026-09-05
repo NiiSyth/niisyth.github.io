@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Radial Touch</title>
+<style>
+  :root {
+    --bg: #0c0d10;
+    --ink: #eae7e0;
+    --dim: #6b6f76;
+    --go: #4dd68c;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--bg);
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  #hud {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 20px 22px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    pointer-events: none;
+    font-family: 'Courier New', ui-monospace, monospace;
+    color: var(--ink);
+    mix-blend-mode: difference;
+  }
+  #count {
+    font-size: 15px;
+    letter-spacing: 0.04em;
+  }
+  #count .n {
+    font-size: 34px;
+    display: block;
+    line-height: 1;
+    font-weight: 700;
+  }
+  #hint {
+    font-size: 13px;
+    color: var(--ink);
+    text-align: right;
+    max-width: 230px;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+  }
+  #idle {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    font-family: Georgia, 'Times New Roman', serif;
+    color: var(--dim);
+    font-size: clamp(20px, 4vw, 30px);
+    letter-spacing: 0.02em;
+    text-align: center;
+    padding: 0 40px;
+    transition: opacity 0.4s ease;
+  }
+
+  #undoBtn {
+    position: fixed;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    pointer-events: auto;
+    font-family: 'Courier New', ui-monospace, monospace;
+    font-size: 13px;
+    letter-spacing: 0.03em;
+    color: var(--ink);
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.25);
+    backdrop-filter: blur(6px);
+    padding: 9px 20px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.2s ease, transform 0.1s ease;
+    opacity: 0.3;
+    overflow: hidden;
+  }
+  #undoBtn.active { opacity: 1; }
+  #undoBtn:active { transform: translateX(-50%) scale(0.94); }
+  #undoBtn.active:hover { background: rgba(255,255,255,0.16); }
+  #undoProgress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    width: 0%;
+    background: #ff5470;
+  }
+  #undoProgress.charging {
+    transition: width 550ms linear;
+    width: 100%;
+  }
+
+  #finalizeBtn {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.85);
+    z-index: 6;
+    pointer-events: none;
+    font-family: 'Courier New', ui-monospace, monospace;
+    color: #0c0d10;
+    background: var(--ink);
+    border: none;
+    width: 108px;
+    height: 108px;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+    opacity: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    transition: opacity 0.25s ease, transform 0.25s ease, background 0.2s ease;
+  }
+  #finalizeBtn.visible {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  #finalizeBtn.visible:not(.round-active) { pointer-events: auto; }
+  #finalizeBtn:active { transform: translate(-50%, -50%) scale(0.92); }
+  #finalizeBtn .fb-main {
+    font-size: 14px;
+    letter-spacing: 0.05em;
+  }
+  #finalizeBtn .fb-round-label {
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    color: rgba(12,13,16,0.6);
+  }
+  #finalizeBtn .fb-round-num {
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  #finalizeBtn.round-active {
+    background: var(--go);
+    cursor: default;
+  }
+  #version {
+    position: fixed;
+    bottom: 12px;
+    right: 16px;
+    z-index: 5;
+    pointer-events: none;
+    font-family: 'Courier New', ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+    opacity: 0.35;
+    mix-blend-mode: difference;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<button id="undoBtn"><span>undo</span><span id="undoProgress"></span></button>
+
+<div id="hud">
+  <div id="count">
+    <span class="n" id="countNum">0</span>
+    players
+  </div>
+  <div id="hint">tap to add a player<br>tap ready when so<br>hold undo to reset everything</div>
+</div>
+
+<button id="finalizeBtn"><span class="fb-main">ready</span></button>
+
+<div id="idle">touch here<br><span style="font-size:0.6em; color:#4a4d53;">points you place stay until you undo or reset</span></div>
+
+<div id="version">v0.01</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const countNum = document.getElementById('countNum');
+  const idle = document.getElementById('idle');
+  const undoBtn = document.getElementById('undoBtn');
+  const undoProgress = document.getElementById('undoProgress');
+  const finalizeBtn = document.getElementById('finalizeBtn');
+
+  let W, H, DPR;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const PALETTE = [
+    '#ff5470', '#3ec1d3', '#ffd23f', '#7c5cff', '#4dd68c',
+    '#ff8b3d', '#5a8dee', '#e85fd0', '#c4f042', '#ff3d7f'
+  ];
+  let colorCursor = 0;
+  function nextColor() {
+    const c = PALETTE[colorCursor % PALETTE.length];
+    colorCursor++;
+    return c;
+  }
+
+  // segments: key -> { x, y, color, live }
+  // Segments are "stamped" — they persist after the finger/mouse lifts,
+  // until explicitly undone or reset.
+  const segments = new Map();
+  const order = [];             // key insertion order, for undo
+  const liveMap = new Map();    // pointerId -> segment key, only while held
+  let segCounter = 0;
+
+  // Game state
+  let roundStarted = false;     // true once "Ready" has been tapped — locks editing
+  let currentRound = 0;
+  let clickedSet = new Set();   // segment keys clicked so far this round
+  const MAX_ROUND = 100;
+
+  function getPos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  function removeSegment(key) {
+    segments.delete(key);
+    const idx = order.indexOf(key);
+    if (idx !== -1) order.splice(idx, 1);
+    for (const [pid, k] of liveMap) {
+      if (k === key) liveMap.delete(pid);
+    }
+  }
+
+  // ---- Audio: a short beep via Web Audio, created lazily on user gesture ----
+  let audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } else if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+  function playBeep() {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.35);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.36);
+  }
+
+  // Equal-degree wedges: sort points by their angle around the pivot, then
+  // lay out exactly 360/n each in that order — segment size never depends
+  // on how close together two points happen to be tapped.
+  function computeWedges(pts, cx, cy) {
+    const n = pts.length;
+    const step = (Math.PI * 2) / n;
+    const withAngle = pts.map(p => ({
+      ...p,
+      angle: Math.atan2(p.y - cy, p.x - cx)
+    })).sort((a, b) => a.angle - b.angle);
+
+    const start0 = withAngle[0].angle - step / 2; // center the first wedge on its own point
+    return withAngle.map((cur, i) => ({
+      ...cur,
+      startAngle: start0 + i * step,
+      endAngle: start0 + (i + 1) * step
+    }));
+  }
+
+  function handleSegmentClick(x, y) {
+    const pts = Array.from(segments, ([key, s]) => ({ key, ...s }));
+    const n = pts.length;
+    if (n === 0) return;
+    const cx = W / 2, cy = H / 2;
+    const step = (Math.PI * 2) / n;
+    const withAngle = pts.map(p => ({
+      ...p,
+      angle: Math.atan2(p.y - cy, p.x - cx)
+    })).sort((a, b) => a.angle - b.angle);
+    const start0 = withAngle[0].angle - step / 2;
+
+    const clickAngle = Math.atan2(y - cy, x - cx);
+    let rel = (clickAngle - start0) % (Math.PI * 2);
+    if (rel < 0) rel += Math.PI * 2;
+    let idx = Math.floor(rel / step);
+    if (idx >= n) idx = n - 1;
+
+    const bestKey = withAngle[idx].key;
+    if (bestKey && !clickedSet.has(bestKey)) {
+      clickedSet.add(bestKey);
+      if (clickedSet.size === segments.size) completeRound();
+    }
+  }
+
+  function completeRound() {
+    playBeep();
+    currentRound = Math.min(currentRound + 1, MAX_ROUND);
+    clickedSet.clear();
+    updateFinalizeButton();
+  }
+
+  // ---- Pointer handling ----
+  canvas.addEventListener('pointerdown', (e) => {
+    ensureAudio();
+
+    if (roundStarted) {
+      e.preventDefault();
+      const { x, y } = getPos(e);
+      handleSegmentClick(x, y);
+      return;
+    }
+
+    e.preventDefault();
+    const { x, y } = getPos(e);
+
+    // tapping an existing point removes it
+    let hitKey = null;
+    for (const [key, s] of segments) {
+      if (Math.hypot(s.x - x, s.y - y) < 28) { hitKey = key; break; }
+    }
+    if (hitKey !== null) {
+      removeSegment(hitKey);
+      return;
+    }
+
+    const key = 'seg-' + (segCounter++);
+    segments.set(key, { x, y, color: nextColor(), live: true });
+    order.push(key);
+    liveMap.set(e.pointerId, key);
+    canvas.setPointerCapture(e.pointerId);
+  }, { passive: false });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (roundStarted) return;
+    const key = liveMap.get(e.pointerId);
+    if (!key) return;
+    const seg = segments.get(key);
+    if (!seg) return;
+    e.preventDefault();
+    const { x, y } = getPos(e);
+    seg.x = x;
+    seg.y = y;
+  }, { passive: false });
+
+  function endPointer(e) {
+    const key = liveMap.get(e.pointerId);
+    liveMap.delete(e.pointerId);
+    if (key) {
+      const seg = segments.get(key);
+      if (seg) seg.live = false;
+    }
+  }
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // ---- Undo (tap) / Reset (long-press) ----
+  function doUndo() {
+    if (roundStarted) return;
+    if (order.length === 0) return;
+    removeSegment(order[order.length - 1]);
+  }
+
+  function doFullReset() {
+    segments.clear();
+    order.length = 0;
+    liveMap.clear();
+    roundStarted = false;
+    currentRound = 0;
+    clickedSet.clear();
+    updateFinalizeButton();
+  }
+
+  const LONG_PRESS_MS = 550;
+  let pressTimer = null;
+  let longPressFired = false;
+
+  function clearPressTimer() {
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    undoProgress.classList.remove('charging');
+    undoProgress.style.transition = 'none';
+    undoProgress.style.width = '0%';
+    requestAnimationFrame(() => { undoProgress.style.transition = ''; });
+  }
+
+  undoBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    longPressFired = false;
+    undoProgress.style.transition = 'none';
+    undoProgress.style.width = '0%';
+    requestAnimationFrame(() => {
+      undoProgress.classList.add('charging');
+    });
+    pressTimer = setTimeout(() => {
+      longPressFired = true;
+      doFullReset();
+      clearPressTimer();
+    }, LONG_PRESS_MS);
+  });
+  undoBtn.addEventListener('pointerup', clearPressTimer);
+  undoBtn.addEventListener('pointercancel', clearPressTimer);
+  undoBtn.addEventListener('pointerleave', clearPressTimer);
+  undoBtn.addEventListener('click', () => {
+    if (longPressFired) { longPressFired = false; return; }
+    doUndo();
+  });
+
+  // ---- Ready / round display ----
+  function updateFinalizeButton() {
+    if (roundStarted) {
+      finalizeBtn.classList.add('visible', 'round-active');
+      finalizeBtn.innerHTML =
+        '<span class="fb-round-label">round</span><span class="fb-round-num">' + currentRound + '</span>';
+    } else if (segments.size > 1) {
+      finalizeBtn.classList.add('visible');
+      finalizeBtn.classList.remove('round-active');
+      finalizeBtn.innerHTML = '<span class="fb-main">Ready</span>';
+    } else {
+      finalizeBtn.classList.remove('visible', 'round-active');
+      finalizeBtn.innerHTML = '<span class="fb-main">Ready</span>';
+    }
+  }
+  finalizeBtn.addEventListener('click', () => {
+    if (roundStarted) return; // inert once a round is running — reset lives on undo long-press
+    if (segments.size > 1) {
+      ensureAudio();
+      roundStarted = true;
+      currentRound = 1;
+      clickedSet.clear();
+    }
+    updateFinalizeButton();
+  });
+
+  function hexToRgba(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  function draw() {
+    const now = performance.now();
+    ctx.clearRect(0, 0, W, H);
+
+    const n = segments.size;
+    countNum.textContent = n;
+    idle.style.opacity = n === 0 ? 1 : 0;
+    undoBtn.classList.toggle('active', order.length > 0 && !roundStarted);
+    updateFinalizeButton();
+
+    if (n === 0) {
+      requestAnimationFrame(draw);
+      return;
+    }
+
+    const pts = Array.from(segments, ([key, s]) => ({ key, ...s }));
+    const R = Math.hypot(W, H);
+
+    if (n === 1) {
+      ctx.fillStyle = hexToRgba(pts[0].color, 0.9);
+      ctx.fillRect(0, 0, W, H);
+    } else {
+      const cx = W / 2, cy = H / 2;
+      const wedges = computeWedges(pts, cx, cy);
+
+      for (const w of wedges) {
+        const alpha = roundStarted
+          ? (clickedSet.has(w.key) ? 0.95 : 0.45)   // faded 50% until clicked this round
+          : 0.9;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, R, w.startAngle, w.endAngle);
+        ctx.closePath();
+        ctx.fillStyle = hexToRgba(w.color, alpha);
+        ctx.fill();
+      }
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fill();
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+
+</body>
+</html>
